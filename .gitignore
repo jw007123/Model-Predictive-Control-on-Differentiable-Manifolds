@@ -1,3 +1,10 @@
+# MSVS
+.vs/
+External/eigen/
+External/stb/
+Build/
+Install/
+
 # Prerequisites
 *.d
 
@@ -5,7 +12,6 @@
 *.slo
 *.lo
 *.o
-*.obj
 
 # Precompiled Headers
 *.gch
