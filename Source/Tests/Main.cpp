@@ -7,11 +7,10 @@
 
 int main()
 {
-	NonLinearSolver<QuadcopterState, 9, 4, 20>::CreateOptions quadSolverOptions;
-	quadSolverOptions = NonLinearSolver<QuadcopterState, 9, 4, 20>::CreateOptions::PrecalculateAll;
+	NonLinearSolver<QuadcopterState, 9, 4, 10>::CreateOptions quadSolverOptions;
+	quadSolverOptions = NonLinearSolver<QuadcopterState, 9, 4, 10>::CreateOptions::PrecalculateAll;
 
 	Quadcopter quadSolver(quadSolverOptions);
-
 
 	return 0;
 }

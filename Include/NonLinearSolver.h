@@ -3,7 +3,6 @@
 #include <iostream>
 #include <functional>
 #include <vector>
-#include <array>
 #include <cassert>
 
 #include <Eigen/Core>
@@ -35,6 +34,10 @@ public:
 	NonLinearSolver(const CreateOptions options_);
 	~NonLinearSolver();
 
+	/// Given x0, xk^d and uk^d, calculates uk^opt
+	bool Solve(std::vector<Control>& ukopt_, const State& x0_, const std::vector<State>& xkd_, const std::vector<Control>& ukd_, const f64 dT_);
+
+protected:
 	/// this() and/or Solve() Constants
 	virtual Eigen::Matrix<f64, N, N> CalculateQZero()   const = 0;
 	virtual Eigen::Matrix<f64, M, M> CalculatePZero()   const = 0;
@@ -45,21 +48,16 @@ public:
 	virtual Eigen::Matrix<f64, N, N> dFdxk(const State& a_, const Control& b_, const f64 dT_) const = 0;
 	virtual Eigen::Matrix<f64, N, M> dFduk(const State& a_, const Control& b_, const f64 dT_) const = 0;
 
-	/// Given x0, xk^d and uk^d, calculates uk^opt
-	bool Solve(std::vector<Control>& ukopt_, const State& x0_, const std::vector<State>& xkd_, const std::vector<Control>& ukd_, const f64 dT_);
-
 private:
-	static constexpr const f64 forwardDifferenceH = f64(0.001);
-
 	/// Required for class to work. See osqp_configure for OSQPInt typedef
 	static_assert(sizeof(OSQPFloat) == sizeof(f64));
 	static_assert(sizeof(OSQPInt) == sizeof(Eigen::SparseMatrix<f64>::StorageIndex));
 
-	std::array<Eigen::Matrix<f64, N, N>, L> FxScratch;
-	std::array<Eigen::Matrix<f64, N, M>, L> FuScratch;
-	Eigen::MatrixX<f64>						matAScratch;	// x = A^-1 * b
-	Eigen::VectorX<f64>						vecBScratch;	// x = A^-1 * b
-	const CreateOptions						options;
+	std::vector<Eigen::Matrix<f64, N, N>> FxScratch; // Length L
+	std::vector<Eigen::Matrix<f64, N, M>> FuScratch; // Length L
+	Eigen::MatrixX<f64>					  matAScratch; // x = A^-1 * b
+	Eigen::VectorX<f64>					  vecBScratch; // x = A^-1 * b
+	const CreateOptions					  options;
 
 	Eigen::MatrixX<f64>      matM;	// [N * L, M * L]
 	Eigen::MatrixX<f64>      matH;	// [N * L, N]
@@ -90,6 +88,10 @@ template <typename State, u32 N, u32 M, u32 L>
 NonLinearSolver<State, N, M, L>::NonLinearSolver(const NonLinearSolver::CreateOptions options_) :
 											     options(options_)
 {
+	// Allocate scratch for Fu/Fx
+	FxScratch.resize(L);
+	FuScratch.resize(L);
+
 	// Resize matM and matH here rather than Solve() due to repeated calls of latter
 	matM.resize(N * L, M * L);
 	matH.resize(N * L, N);
@@ -284,6 +286,17 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(std::vector<Control>& u
 	matAScratch *= matQ * matM;
 	vecBScratch  = (matM.transpose()) * matQ * matH * dx0_ * f64(-1.0);
 
+	// osqp assumes matA is symmetric and only wants the upper-triangular coeffs.
+	// To make sure te EigenToOSQPCsc gives just these, zero the lower-triangular coeffs
+	for (u32 i = 0; i < matAScratch.rows(); ++i)
+	{
+		for (u32 j = 0; j < i; ++j)
+		{
+			matAScratch(i, j) = 0.0;
+		}
+	}
+	assert(matAScratch.isUpperTriangular());
+
 	// Convert to Eigen sparse and then csc
 	OSQPCscMatrix cscA;
 	OSQPCscMatrix cscpU;
@@ -302,7 +315,7 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(std::vector<Control>& u
 	const OSQPFloat* uMin = (OSQPFloat*)matdU.col(0).data();
 	const OSQPFloat* uMax = (OSQPFloat*)matdU.col(1).data();
 	OSQPInt solveErrors   = 0;
-	osqpExitFlag		  = osqp_setup(&osqpSolver, &cscA, vecBScratch.data(), &cscpU, uMin, uMax, M * O, M * O, &osqpSettings);
+	osqpExitFlag		  = osqp_setup(&osqpSolver, &cscA, vecBScratch.data(), &cscpU, uMin, uMax, M * L, M * L, &osqpSettings);
 	if (!osqpExitFlag)
 	{
 		solveErrors = osqp_solve(osqpSolver);

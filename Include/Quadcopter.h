@@ -15,8 +15,9 @@ struct QuadcopterState
 class Quadcopter : public NonLinearSolver<QuadcopterState, 9, 4, 10>
 {
 public:
-	using NonLinearSolver<QuadcopterState, 9, 4, 20>::NonLinearSolver;
+	using NonLinearSolver<QuadcopterState, 9, 4, 10>::NonLinearSolver;
 
+protected:
 	/// Virtuals: constants
 	Eigen::Matrix<f64, 9, 9> CalculateQZero()   const;
 	Eigen::Matrix<f64, 4, 4> CalculatePZero()   const;

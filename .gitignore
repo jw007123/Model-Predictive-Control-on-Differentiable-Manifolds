@@ -2,6 +2,7 @@
 .vs/
 External/eigen/
 External/stb/
+External/osqp
 Build/
 Install/
 
