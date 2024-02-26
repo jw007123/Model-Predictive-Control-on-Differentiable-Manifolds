@@ -48,43 +48,32 @@ Eigen::Vector<f64, 4> BicycleModel::BoxMinus(const BicycleModelState& a_, const 
 
 Eigen::Matrix<f64, 4, 4> BicycleModel::dFdxk(const BicycleModelState& a_, const Control& b_, const f64 dT_) const
 {
-	// Determine dTf
-	const Eigen::Vector<f64, 4> dTf = dT_ * f(a_, b_);
-
 	// Determine Gx = I_n BS 1 BS 1, where BS is the block sum. I.e. the identity
 	const Eigen::Matrix<f64, 4, 4> Gx(Eigen::Matrix<f64, 4, 4>::Identity());
 
-	// Likewise for Gf. NOTE(IF): These could be removed, but are kept in for readability sake
-	const Eigen::Matrix<f64, 4, 4> Gf(Eigen::Matrix<f64, 4, 4>::Identity());
+	Eigen::Matrix<f64, 4, 4> dfddx(Eigen::Matrix<f64, 4, 4>::Zero());
+	dfddx(0, 2) = std::cos(b_(1));
+	dfddx(1, 2) = std::sin(b_(1));
+	dfddx(3, 2) = (1.0 / wheelRadiusM) * std::tan(b_(1));
 
-	Eigen::Matrix<f64, 4, 4> dfddx;
-	/*
-	*
-	*		CALCULATE
-	* 
-	*/
-
-	// Fxk = Gx + dT * Gf * (df/ddx)_{d = 0}
-	return (Gx + (dT_ * Gf * dfddx));
+	// Fxk = Gx + dT * Gf * (df/ddx)_{d = 0}. Gf is the identity and can be ignored
+	return (Gx + (dT_ * dfddx));
 }
 
 Eigen::Matrix<f64, 4, 2> BicycleModel::dFduk(const BicycleModelState& a_, const Control& b_, const f64 dT_) const
 {
-	// Determine dTf
-	const Eigen::Vector<f64, 4> dTf = dT_ * f(a_, b_);
+	// Precalc sin(b_(1)) and cos(b_(1)) for dfddu
+	const f64 s1 = std::sin(b_(1));
+	const f64 c1 = std::cos(b_(1));
 
-	// Determine Gf = I_n BS 1 BS 1, where BS is the block sum. I.e. the identity
-	const Eigen::Matrix<f64, 4, 4> Gf(Eigen::Matrix<f64, 4, 4>::Identity());
+	Eigen::Matrix<f64, 4, 2> dfddu(Eigen::Matrix<f64, 4, 2>::Zero());
+	dfddu(2, 0) = 1.0;
+	dfddu(0, 1) = -a_.v * s1;
+	dfddu(1, 1) = a_.v * c1;
+	dfddu(3, 1) = (a_.v / wheelRadiusM) * (1.0 / (c1 * c1));
 
-	Eigen::Matrix<f64, 4, 4> dfddu;
-	/*
-	*
-	*		CALCULATE
-	*
-	*/
-
-	// Fuk = dT * Gf * (df/ddu)_{d = 0}
-	return (dT_ * Gf * dfddu);
+	// Fuk = dT * Gf * (df/ddu)_{d = 0}.  Gf is the identity and can be ignored
+	return (dT_ * dfddu);
 }
 
 f64 BicycleModel::Log(const Eigen::Matrix2d& R_)
