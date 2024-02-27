@@ -23,19 +23,24 @@ public:
 
 	enum class CreateOptions : u8
 	{
-		None				= 0,						 // Assumes nothing
-		PrecalculateQ		= 1,						 // Assumes CalculateQZero is constant at run-time
-		PrecalculateP		= 1 << 1,					 // Assumes CalculatePZero is constant at run-time
-		PrecalculateUBounds = 1 << 2,					 // Assumes CalculateUBounds is constant at run-time
-		PrecalculateAll		= 1 && (1 << 1) && (1 << 2), // Assumes all functions are constant at run-time
-		IgnoreUBounds		= 1 << 3					 // Assumes CalculateUBounds = [-inf, inf]
+		None				= 0,				       // Assumes nothing
+		PrecalculateQ		= 1,					   // Assumes CalculateQZero is constant at run-time
+		PrecalculateP		= 1 << 1,				   // Assumes CalculatePZero is constant at run-time
+		PrecalculateUBounds = 1 << 2,				   // Assumes CalculateUBounds is constant at run-time
+		PrecalculateAll		= 1 | (1 << 1) | (1 << 2), // Assumes all functions are constant at run-time
+		IgnoreUBounds		= 1 << 3				   // Assumes CalculateUBounds = [-inf, inf]
 	};
 
 	NonLinearSolver(const CreateOptions options_);
-	~NonLinearSolver();
 
-	/// Given x0, xk^d and uk^d, calculates uk^opt
-	bool Solve(std::vector<Control>& ukopt_, const State& x0_, const std::vector<State>& xkd_, const std::vector<Control>& ukd_, const f64 dT_);
+	/// State transition function
+	virtual Eigen::Vector<f64, N> f(const State& a_, const Control& b_) const = 0;
+
+	/// Update operator for x_{k + 1} = xk (+) dT * f(xk, uk)
+	virtual State ApplyDelta(const State& a_, const Eigen::Vector<f64, N>& delta_, const f64 dT_) const = 0;
+
+	/// Given x0, xk^d and uk^d, calculates uk^opt. Assumes all ptrs own at least L x sizeof(T) bytes
+	bool Solve(Control* const ukopt_, const State& x0_, const State* const xkd_, const Control* const ukd_, const f64 dT_);
 
 protected:
 	/// this() and/or Solve() Constants
@@ -53,10 +58,11 @@ private:
 	static_assert(sizeof(OSQPFloat) == sizeof(f64));
 	static_assert(sizeof(OSQPInt) == sizeof(Eigen::SparseMatrix<f64>::StorageIndex));
 
-	std::vector<Eigen::Matrix<f64, N, N>> FxScratch; // Length L
-	std::vector<Eigen::Matrix<f64, N, M>> FuScratch; // Length L
-	Eigen::MatrixX<f64>					  matAScratch; // x = A^-1 * b
-	Eigen::VectorX<f64>					  vecBScratch; // x = A^-1 * b
+	std::vector<Eigen::Matrix<f64, N, N>> FxScratch;      // Length L
+	std::vector<Eigen::Matrix<f64, N, M>> FuScratch;      // Length L
+	Eigen::MatrixX<f64>					  matAScratch;    // x = A^-1 * b
+	Eigen::VectorX<f64>					  vecBScratch;    // x = A^-1 * b
+	bool								  firstSolveCall; // Default false
 	const CreateOptions					  options;
 
 	Eigen::MatrixX<f64>      matM;	// [N * L, M * L]
@@ -71,10 +77,10 @@ private:
 	void CalculateConstants(const bool calcQ_, const bool calcP_, const bool calcU_);
 
 	/// Solves an unconstrained QP problem analytically
-	void SolveUnconstrainedQP(std::vector<Control>& ukopt_, const Eigen::Vector<f64, N>& dx0_);
+	void SolveUnconstrainedQP(Control* const  ukopt_, const Eigen::Vector<f64, N>& dx0_);
 
 	/// Solves a constrained QP problem via OSQP
-	bool SolveConstrainedQP(std::vector<Control>& ukopt_, const Eigen::Vector<f64, N>& dx0_);
+	bool SolveConstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_);
 
 	/// Helper function to add to larger matrices
 	template <u32 R, u32 C>
@@ -108,32 +114,42 @@ NonLinearSolver<State, N, M, L>::NonLinearSolver(const NonLinearSolver::CreateOp
 	// Resize scratch used in the final QP solve
 	matAScratch.resize(M * L, M * L);
 	vecBScratch.resize(M * L);
-		
-	// Optionally calculate constants
-	CalculateConstants((u8)options & (u8)CreateOptions::PrecalculateQ,
-					   (u8)options & (u8)CreateOptions::PrecalculateP,
-					   (u8)options & (u8)CreateOptions::PrecalculateUBounds && !((u8)options & (u8)CreateOptions::IgnoreUBounds));
+
+	// Set all uninitialised 'mat' matrices to 0 in order to satisfy a few assumptions made later
+	matM.setZero();
+	matH.setZero();
+	matQ.setZero();
+	matP.setZero();
+	matdU.setZero();
+
+	// Used to determine when to call CalculateConstants()
+	firstSolveCall = true;
 }
 
 template <typename State, u32 N, u32 M, u32 L>
-NonLinearSolver<State, N, M, L>::~NonLinearSolver()
+bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& x0_, const State* const xkd_, const Control* const ukd_, const f64 dT_)
 {
+	if (firstSolveCall)
+	{
+		// Always calculate on the first call to Solve()
+		CalculateConstants(true, true, true);
+	}
+	else
+	{
+		// On later calls, this is now dependent on CreateOptions
+		CalculateConstants(!((u8)options & (u8)CreateOptions::PrecalculateQ),
+						   !((u8)options & (u8)CreateOptions::PrecalculateP),
+					       !((u8)options & (u8)CreateOptions::PrecalculateUBounds) && !((u8)options & (u8)CreateOptions::IgnoreUBounds));
+	}
 
-}
-
-template <typename State, u32 N, u32 M, u32 L>
-bool NonLinearSolver<State, N, M, L>::Solve(std::vector<NonLinearSolver::Control>& ukopt_, const State& x0_, const std::vector<State>& xkd_, const std::vector<NonLinearSolver::Control>& ukd_, const f64 dT_)
-{
-	// Optionally calculate constants
-	CalculateConstants(!((u8)options & (u8)CreateOptions::PrecalculateQ),
-					   !((u8)options & (u8)CreateOptions::PrecalculateP),
-					   !((u8)options & (u8)CreateOptions::PrecalculateUBounds) && !((u8)options & (u8)CreateOptions::IgnoreUBounds));
+	// No longer on first call to Solve()
+	firstSolveCall = false;
 
 	// Determine dx0
 	const Eigen::Vector<f64, N> dx0 = BoxMinus(x0_, xkd_[0]);
 
 	// Fill Fx and Fu buffers to avoid recalculating Jacobians
-	for (u32 i = 0; i < L; +i)
+	for (u32 i = 0; i < L; ++i)
 	{
 		// dxk = 0 => xk = xkd. Likewise for uk
 		FxScratch[i] = dFdxk(xkd_[i], ukd_[i], dT_);
@@ -146,12 +162,9 @@ bool NonLinearSolver<State, N, M, L>::Solve(std::vector<NonLinearSolver::Control
 	{
 		dFdxkMult *= FxScratch[i];
 
-		for (u32 j = 0; j < L; ++j)
-		{
-			// Add Mult(Fxk)^T to matH
-			const Eigen::Matrix<f64, N, N> dFdxkMultT = dFdxkMult.transpose();
-			PushAToB(dFdxkMultT, matH, j * N, 0);
-		}
+		// Add Mult(Fxk)^T to matH
+		const Eigen::Matrix<f64, N, N> dFdxkMultT = dFdxkMult.transpose();
+		PushAToB(dFdxkMultT, matH, i * N, 0);
 	}
 
 	// Calculate matM. Most of matrix is zeroes, so default to zero
@@ -164,8 +177,8 @@ bool NonLinearSolver<State, N, M, L>::Solve(std::vector<NonLinearSolver::Control
 		for (i32 j = i; j >= 0; --j)
 		{
 			// Add Mult(Fxk) * Fuk to matM
-			const Eigen::Matrix<f64, N, N> dFdxkMultFuk = dFdxkMult * FuScratch[j];
-			PushAToB(dFdxkMultFuk, matM, i * N, j * N);
+			const Eigen::Matrix<f64, N, M> dFdxkMultFuk = dFdxkMult * FuScratch[j];
+			PushAToB(dFdxkMultFuk, matM, i * N, j * M);
 
 			// For i = 1, j = 0: dFdxkMult = FxScratch[1 - 0] = FxScratch[1] as required
 			dFdxkMult *= FxScratch[i - j];
@@ -199,7 +212,7 @@ bool NonLinearSolver<State, N, M, L>::Solve(std::vector<NonLinearSolver::Control
 		}
 	}
 
-	return error;
+	return !error;
 }
 
 template <typename State, u32 N, u32 M, u32 L>
@@ -233,13 +246,7 @@ template <typename State, u32 N, u32 M, u32 L>
 template <u32 R, u32 C>
 void NonLinearSolver<State, N, M, L>::PushAToB(const Eigen::Matrix<f64, R, C>& a_, Eigen::MatrixX<f64>& b_, const u32 bRowStart_, const u32 bColStart_)
 {
-	for (u32 i = 0; i < R; ++i)
-	{
-		for (u32 j = 0; j < C; ++j)
-		{
-			b_(bRowStart_ + i, bColStart_ + j) = a_(i, j);
-		}
-	}
+	b_.block<R, C>(bRowStart_, bColStart_) = a_;
 }
 
 template <typename State, u32 N, u32 M, u32 L>
@@ -260,7 +267,7 @@ void NonLinearSolver<State, N, M, L>::EigenToOSQPCsc(const Eigen::MatrixX<f64>& 
 }
 
 template <typename State, u32 N, u32 M, u32 L>
-void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(std::vector<Control>& ukopt_, const Eigen::Vector<f64, N>& dx0_)
+void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_)
 {
 	// Need to split operation up due to Eigen aliasing
 	matAScratch  = matM.transpose();
@@ -274,12 +281,12 @@ void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(std::vector<Control>&
 	// Place dU in vector
 	for (u32 i = 0; i < L; ++i)
 	{
-		ukopt_[i] = dU.block<M, 1>(i * M, 1);
+		ukopt_[i] = dU.block<M, 1>(i * M, 0);
 	}
 }
 
 template <typename State, u32 N, u32 M, u32 L>
-bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(std::vector<Control>& ukopt_, const Eigen::Vector<f64, N>& dx0_)
+bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_)
 {
 	// Need to split operation up due to Eigen aliasing
 	matAScratch  = matM.transpose();

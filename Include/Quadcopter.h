@@ -15,7 +15,18 @@ struct QuadcopterState
 class Quadcopter : public NonLinearSolver<QuadcopterState, 9, 4, 10>
 {
 public:
+	/// Inherit ctor from base class
 	using NonLinearSolver<QuadcopterState, 9, 4, 10>::NonLinearSolver;
+
+	/// Convenience
+	typedef NonLinearSolver<QuadcopterState, 9, 4, 10>::CreateOptions CreateOptions;
+
+	/// Virtuals: functions
+	Eigen::Vector<f64, 9> f(const QuadcopterState& a_, const Control& b_)											const;
+	QuadcopterState	      ApplyDelta(const QuadcopterState& a_, const Eigen::Vector<f64, 9>& delta_, const f64 dT_) const;
+
+	/// Helper function for whether two states are approximately equal
+	static bool IsApprox(const QuadcopterState& a_, const QuadcopterState& b_, const f64 eulTolSq_, const f64 rotTolSq_);
 
 protected:
 	/// Virtuals: constants
@@ -37,7 +48,4 @@ private:
 
 	/// A as in (44) https://arxiv.org/pdf/2106.15233.pdf
 	static Eigen::Matrix3d A(const Eigen::Vector3d& w_);
-
-	/// State equation f in (33c) https://arxiv.org/pdf/2106.15233.pdf
-	static Eigen::Vector<f64, 9> f(const QuadcopterState& a_, const Control& b_);
 };

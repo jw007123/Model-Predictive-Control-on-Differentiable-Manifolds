@@ -18,8 +18,20 @@ struct BicycleModelState
 class BicycleModel : public NonLinearSolver<BicycleModelState, 4, 2, 10>
 {
 public:
+	/// Inherit ctor from base class
 	using NonLinearSolver<BicycleModelState, 4, 2, 10>::NonLinearSolver;
 
+	/// Convenience
+	typedef NonLinearSolver<BicycleModelState, 4, 2, 10>::CreateOptions CreateOptions;
+
+	/// Virtuals: functions
+	Eigen::Vector<f64, 4> f(const BicycleModelState& a_, const Control& b_)											  const;
+	BicycleModelState     ApplyDelta(const BicycleModelState& a_, const Eigen::Vector<f64, 4>& delta_, const f64 dT_) const;
+
+	/// Helper function for whether two states are approximately equal
+	static bool IsApprox(const BicycleModelState& a_, const BicycleModelState& b_, const f64 eulTolSq_, const f64 rotTolSq_);
+
+	/// Generic setter...
 	void SetWheelRadius(const f64 wheelRadiusM_);
 
 protected:
@@ -41,7 +53,4 @@ private:
 
 	/// SO(2) Exp function (7) https://arxiv.org/pdf/2106.15233.pdf
 	static Eigen::Matrix2d Exp(const f64& w_);
-
-	/// State equation for 2D bicycle model
-	Eigen::Vector<f64, 4> f(const BicycleModelState& a_, const Control& b_) const;
 };

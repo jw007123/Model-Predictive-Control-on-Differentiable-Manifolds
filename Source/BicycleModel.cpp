@@ -7,6 +7,47 @@ BicycleModelState::BicycleModelState()
 	R.setIdentity();
 }
 
+Eigen::Vector<f64, 4> BicycleModel::f(const BicycleModelState& a_, const Control& b_) const
+{
+	Eigen::Vector<f64, 4> fk;
+	fk(0) = a_.v * std::cos(b_(1));
+	fk(1) = a_.v * std::sin(b_(1));
+	fk(2) = b_(0);
+	fk(3) = (a_.v / wheelRadiusM) * std::tan(b_(1));
+
+	return fk;
+}
+
+BicycleModelState BicycleModel::ApplyDelta(const BicycleModelState& a_, const Eigen::Vector<f64, 4>& delta_, const f64 dT_) const
+{
+	// For Euclidean components of a_, OP := +_n. For SO(2) R comp, OP := x * Exp(R)
+	BicycleModelState b = a_;
+	b.p += (dT_ * delta_.segment<2>(0));
+	b.v += (dT_ * delta_(2));
+	b.R *= (dT_ * Exp(delta_(3)));
+
+	return b;
+}
+
+bool BicycleModel::IsApprox(const BicycleModelState& a_, const BicycleModelState& b_, const f64 eulTolSq_, const f64 rotTolSq_)
+{
+	// Use correct L2 norm for Euclidean spaces and SO(2) space
+	if ((a_.p - b_.p).squaredNorm() > eulTolSq_)
+	{
+		return false;
+	}
+	if (((a_.v - b_.v) * (a_.v - b_.v)) > eulTolSq_)
+	{
+		return false;
+	}
+	if ((Log(a_.R.inverse() * b_.R) * Log(a_.R.inverse() * b_.R)) > rotTolSq_)
+	{
+		return false;
+	}
+
+	return true;
+}
+
 void BicycleModel::SetWheelRadius(const f64 wheelRadiusM_)
 {
 	wheelRadiusM = wheelRadiusM_;
@@ -28,7 +69,7 @@ Eigen::Matrix<f64, 2, 2> BicycleModel::CalculateUBounds() const
 
 	Eigen::Matrix<f64, 2, 2> U;
 	U.col(0) = Eigen::Vector<f64, 2>(-3.0, -pi * 0.25);
-	U.col(1) = Eigen::Vector<f64, 4>( 3.0,  pi * 0.25);
+	U.col(1) = Eigen::Vector<f64, 2>( 3.0,  pi * 0.25);
 
 	return U;
 }
@@ -39,9 +80,9 @@ Eigen::Vector<f64, 4> BicycleModel::BoxMinus(const BicycleModelState& a_, const 
 	// For SO(2), boxminus = Log(a^-1 * b)
 	// Use manifold composition of boxminus to obtain result
 	Eigen::Vector<f64, 4> aBoxMinusB;
-	aBoxMinusB.head<2>(0) = b_.p - a_.p;
-	aBoxMinusB(2)		  = b_.v - a_.v;
-	aBoxMinusB(3)		  = Log(a_.R.inverse() * b_.R);
+	aBoxMinusB.segment<2>(0) = b_.p - a_.p;
+	aBoxMinusB(2)			 = b_.v - a_.v;
+	aBoxMinusB(3)			 = Log(a_.R.inverse() * b_.R);
 
 	return aBoxMinusB;
 }
@@ -78,7 +119,7 @@ Eigen::Matrix<f64, 4, 2> BicycleModel::dFduk(const BicycleModelState& a_, const 
 
 f64 BicycleModel::Log(const Eigen::Matrix2d& R_)
 {
-	return std::atan2(R_(2, 1), R_(1, 1));
+	return std::atan2(R_(1, 0), R_(0, 0));
 }
 
 Eigen::Matrix2d BicycleModel::Exp(const f64& w_)
@@ -91,15 +132,4 @@ Eigen::Matrix2d BicycleModel::Exp(const f64& w_)
 		 sw,  cw;
 
 	return R;
-}
-
-Eigen::Vector<f64, 4> BicycleModel::f(const BicycleModelState& a_, const Control& b_) const
-{
-	Eigen::Vector<f64, 4> fk;
-	fk(0) = a_.v * std::cos(b_(1));
-	fk(1) = a_.v * std::sin(b_(1));
-	fk(2) = b_(0);
-	fk(3) = (a_.v / wheelRadiusM) * std::tan(b_(1));
-
-	return fk;
 }
