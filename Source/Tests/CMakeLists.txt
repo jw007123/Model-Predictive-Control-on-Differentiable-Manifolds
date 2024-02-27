@@ -28,5 +28,11 @@ endif()
 add_compile_definitions(HAS_STB)
 
 add_executable(Tests "Main.cpp")
+
 target_link_libraries(Tests PRIVATE osqp::osqpstatic)
 target_link_libraries(Tests LINK_PUBLIC Lib_MPC)
+
+target_include_directories(Tests PUBLIC "../../Include")
+target_include_directories(Tests PUBLIC "../../Source")
+target_include_directories(Tests PUBLIC "../../External/eigen")
+target_include_directories(Tests PUBLIC "../../External/stb")

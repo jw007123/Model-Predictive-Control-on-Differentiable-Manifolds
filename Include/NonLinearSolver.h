@@ -56,7 +56,6 @@ protected:
 private:
 	/// Required for class to work. See osqp_configure for OSQPInt typedef
 	static_assert(sizeof(OSQPFloat) == sizeof(f64));
-	static_assert(sizeof(OSQPInt) == sizeof(Eigen::SparseMatrix<f64>::StorageIndex));
 
 	std::vector<Eigen::Matrix<f64, N, N>> FxScratch;      // Length L
 	std::vector<Eigen::Matrix<f64, N, M>> FuScratch;      // Length L
@@ -70,7 +69,7 @@ private:
 	Eigen::MatrixX<f64>      matQ;	// [N * L, N * L]
 	Eigen::MatrixX<f64>	     matP;  // [M * L, M * L]
 	Eigen::MatrixX<f64>		 matdU; // [M * L, 2]
-	Eigen::MatrixX<f64>		 matpU;	// [M * L, 1]
+	Eigen::MatrixX<f64>		 matpU;	// [M * L, M * L]
 	Eigen::Matrix<f64, M, 2> matU;
 
 	/// Optionally calculates matQ, matP and matU
@@ -87,7 +86,7 @@ private:
 	static void PushAToB(const Eigen::Matrix<f64, R, C>& a_, Eigen::MatrixX<f64>& b_, const u32 bRowStart_, const u32 bColStart_);
 
 	/// Helper function to convert from Eigen::MatrixX<f64> to OSQPCscMatrix
-	static void EigenToOSQPCsc(const Eigen::MatrixX<f64>& eigen_, OSQPCscMatrix& csc_);
+	static void EigenToOSQPCsc(const Eigen::MatrixX<f64>& eigen_, Eigen::SparseMatrix<f64, 0, OSQPInt>& sparse_, OSQPCscMatrix& csc_);
 };
 
 template <typename State, u32 N, u32 M, u32 L>
@@ -107,15 +106,18 @@ NonLinearSolver<State, N, M, L>::NonLinearSolver(const NonLinearSolver::CreateOp
 	matP.resize(M * L,  M * L);
 	matdU.resize(M * L, 2);
 
-	// matpU is used in OSQP as is just a vector of ones
-	matpU.resize(M * L, 1);
-	matpU.setOnes();
+	// matpU is used in OSQP as is just the identity matrix as we constrain every coeff of U
+	// If we want the coeff to behave as if it's unconstrained, set l = -inf and u = inf
+	matpU.resize(M * L, M * L);
+	matpU.setIdentity();
 
 	// Resize scratch used in the final QP solve
 	matAScratch.resize(M * L, M * L);
 	vecBScratch.resize(M * L);
 
 	// Set all uninitialised 'mat' matrices to 0 in order to satisfy a few assumptions made later
+	matAScratch.setZero();
+	vecBScratch.setZero();
 	matM.setZero();
 	matH.setZero();
 	matQ.setZero();
@@ -204,7 +206,7 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 			matdU.block<M, 1>(i * M, 1) = matU.col(1) - ukd_[i];
 		}
 
-		error = SolveConstrainedQP(ukopt_, dx0);
+		error = !SolveConstrainedQP(ukopt_, dx0);
 	}
 
 	// If solving was OK, determine Uopt via Uopt = dU + Ud
@@ -217,6 +219,8 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 	}
 
 	// Cleanup
+	matAScratch.setZero();
+	vecBScratch.setZero();
 	matH.setZero();
 	matM.setZero();
 	matQ.setZero();
@@ -261,35 +265,34 @@ void NonLinearSolver<State, N, M, L>::PushAToB(const Eigen::Matrix<f64, R, C>& a
 }
 
 template <typename State, u32 N, u32 M, u32 L>
-void NonLinearSolver<State, N, M, L>::EigenToOSQPCsc(const Eigen::MatrixX<f64>& eigen_, OSQPCscMatrix& csc_)
+void NonLinearSolver<State, N, M, L>::EigenToOSQPCsc(const Eigen::MatrixX<f64>& eigen_, Eigen::SparseMatrix<f64, 0, OSQPInt>& sparse_, OSQPCscMatrix& csc_)
 {
-	// MatrixX -> SparseMatrix
-	Eigen::SparseMatrix<f64> sparse;
-	sparse = eigen_.sparseView();
-
-	// SparseMatrix must be in compressed form
-	sparse.makeCompressed();
+	// MatrixX -> SparseMatrix in compressed form
+	sparse_ = eigen_.sparseView();
+	sparse_.makeCompressed();
 
 	// Use helper function rather than setting values ourselves
 	csc_set_data(&csc_,
-				 (OSQPInt)sparse.innerSize(),
-				 (OSQPInt)sparse.outerSize(),
-				 (OSQPInt)sparse.nonZeros(),
-				 (OSQPFloat*)sparse.valuePtr(),
-				 (OSQPInt*)sparse.innerIndexPtr(),
-				 (OSQPInt*)sparse.outerIndexPtr());
+				 (OSQPInt)sparse_.innerSize(),
+				 (OSQPInt)sparse_.outerSize(),
+				 (OSQPInt)sparse_.nonZeros(),
+				 (OSQPFloat*)sparse_.valuePtr(),
+				 (OSQPInt*)sparse_.innerIndexPtr(),
+				 (OSQPInt*)sparse_.outerIndexPtr());
 }
 
 template <typename State, u32 N, u32 M, u32 L>
 void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_)
 {
-	// Need to split operation up due to Eigen aliasing
-	matAScratch  = matM.transpose();
-	matAScratch *= matQ * matM;
-	vecBScratch  = (matM.transpose()) * matQ * matH * dx0_ * -1.0;
+	// Split operation to get a speed-up as A is symmetric
+	matAScratch.triangularView<Eigen::Upper>()		   = matM.transpose() * matQ * matM;
+	matAScratch.triangularView<Eigen::StrictlyLower>() = matAScratch.transpose();
+	vecBScratch										   = matM.transpose() * matQ * matH * dx0_ * -1.0;
 
 	// Solve for dU https://eigen.tuxfamily.org/dox/classEigen_1_1CompleteOrthogonalDecomposition.html
-	Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixX<f64>> exactSolver(matAScratch);
+	// Using Eigen::Ref reduces a deep copy inside the solver by writing directly into A, which is fine
+	// since we no longer use A after this
+	Eigen::CompleteOrthogonalDecomposition<Eigen::Ref<Eigen::MatrixX<f64>>> exactSolver(matAScratch);
 	const Eigen::Matrix<f64, M * L, 1> dU = exactSolver.solve(vecBScratch);
 
 	// Place dU in vector
@@ -302,27 +305,19 @@ void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(Control* const ukopt_
 template <typename State, u32 N, u32 M, u32 L>
 bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_)
 {
-	// Need to split operation up due to Eigen aliasing
-	matAScratch  = matM.transpose();
-	matAScratch *= matQ * matM;
-	vecBScratch  = (matM.transpose()) * matQ * matH * dx0_ * f64(-1.0);
-
 	// osqp assumes matA is symmetric and only wants the upper-triangular coeffs.
-	// To make sure te EigenToOSQPCsc gives just these, zero the lower-triangular coeffs
-	for (u32 i = 0; i < matAScratch.rows(); ++i)
-	{
-		for (u32 j = 0; j < i; ++j)
-		{
-			matAScratch(i, j) = 0.0;
-		}
-	}
-	assert(matAScratch.isUpperTriangular());
+	// To make sure that EigenToOSQPCsc gives just these, we don't calculate the lower coeffs
+	matAScratch.triangularView<Eigen::Upper>() = matM.transpose() * matQ * matM;
+	vecBScratch								   = matM.transpose() * matQ * matH * dx0_ * -1.0;
 
-	// Convert to Eigen sparse and then csc
+	// Convert to Eigen sparse and then csc. Sparse matrices must remain in scope as
+	// csc matrices just use their pointers
+	Eigen::SparseMatrix<f64, 0, OSQPInt> sparseA;
+	Eigen::SparseMatrix<f64, 0, OSQPInt> sparsepU;
 	OSQPCscMatrix cscA;
 	OSQPCscMatrix cscpU;
-	EigenToOSQPCsc(matAScratch, cscA);
-	EigenToOSQPCsc(matpU,		cscpU);
+	EigenToOSQPCsc(matAScratch, sparseA, cscA);
+	EigenToOSQPCsc(matpU, sparsepU, cscpU);
 
 	// Setup osqp vars
 	OSQPSolver*	 osqpSolver;
@@ -331,12 +326,22 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, 
 
 	// Uses settings as in osqp_api_constants
 	osqp_set_default_settings(&osqpSettings);
+	osqpSettings.verbose = false;
 
 	// Setup solving and check for errors
 	const OSQPFloat* uMin = (OSQPFloat*)matdU.col(0).data();
 	const OSQPFloat* uMax = (OSQPFloat*)matdU.col(1).data();
 	OSQPInt solveErrors   = 0;
-	osqpExitFlag		  = osqp_setup(&osqpSolver, &cscA, vecBScratch.data(), &cscpU, uMin, uMax, M * L, M * L, &osqpSettings);
+	osqpExitFlag		  = osqp_setup(&osqpSolver,			// solverp
+									   &cscA,				// P
+									   vecBScratch.data(),	// q
+									   &cscpU,				// A
+									   uMin,				// l
+									   uMax,				// u
+									   M * L,				// m
+									   M * L,				// n
+									   &osqpSettings);		// settings
+
 	if (!osqpExitFlag)
 	{
 		solveErrors = osqp_solve(osqpSolver);
