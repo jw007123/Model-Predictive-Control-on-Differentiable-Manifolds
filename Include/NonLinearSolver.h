@@ -146,7 +146,7 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 	firstSolveCall = false;
 
 	// Determine dx0
-	const Eigen::Vector<f64, N> dx0 = BoxMinus(x0_, xkd_[0]);
+	const Eigen::Vector<f64, N> dx0 = BoxMinus(xkd_[0], x0_);
 
 	// Fill Fx and Fu buffers to avoid recalculating Jacobians
 	for (u32 i = 0; i < L; ++i)
@@ -160,7 +160,10 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 	Eigen::Matrix<f64, N, N> dFdxkMult(Eigen::Matrix<f64, N, N>::Identity());
 	for (u32 i = 0; i < L; ++i)
 	{
-		dFdxkMult *= FxScratch[i];
+		// Avoids aliasing and we want the left-multiple: A = B * A. A *= B gives A = A * B,
+		// which is wrong for us here
+		const Eigen::Matrix<f64, N, N> dFdxk1Mult = FxScratch[i] * dFdxkMult;
+		dFdxkMult								  = dFdxk1Mult;
 
 		// Add Mult(Fxk)^T to matH
 		const Eigen::Matrix<f64, N, N> dFdxkMultT = dFdxkMult.transpose();
@@ -168,7 +171,6 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 	}
 
 	// Calculate matM. Most of matrix is zeroes, so default to zero
-	matM.setZero();
 	for (u32 i = 0; i < L; ++i)
 	{
 		dFdxkMult.setIdentity();
@@ -180,8 +182,10 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 			const Eigen::Matrix<f64, N, M> dFdxkMultFuk = dFdxkMult * FuScratch[j];
 			PushAToB(dFdxkMultFuk, matM, i * N, j * M);
 
-			// For i = 1, j = 0: dFdxkMult = FxScratch[1 - 0] = FxScratch[1] as required
-			dFdxkMult *= FxScratch[i - j];
+			// For i = 1, j = 0: dFdxkMult = FxScratch[1 - 0] = FxScratch[1] as required.
+			// As for H, we want the left-multiple and use the extra var to avoid aliasing
+			const Eigen::Matrix<f64, N, N> dFdxk1Mult = FxScratch[i - j] * dFdxkMult;
+			dFdxkMult								  = dFdxk1Mult;
 		}
 	}
 
@@ -211,6 +215,13 @@ bool NonLinearSolver<State, N, M, L>::Solve(Control* const ukopt_, const State& 
 			ukopt_[i] = ukopt_[i] + ukd_[i];
 		}
 	}
+
+	// Cleanup
+	matH.setZero();
+	matM.setZero();
+	matQ.setZero();
+	matP.setZero();
+	matdU.setZero();
 
 	return !error;
 }
@@ -260,7 +271,10 @@ void NonLinearSolver<State, N, M, L>::EigenToOSQPCsc(const Eigen::MatrixX<f64>& 
 	sparse.makeCompressed();
 
 	// Use helper function rather than setting values ourselves
-	csc_set_data(&csc_, sparse.innerSize(), sparse.outerSize(), sparse.nonZeros(),
+	csc_set_data(&csc_,
+				 (OSQPInt)sparse.innerSize(),
+				 (OSQPInt)sparse.outerSize(),
+				 (OSQPInt)sparse.nonZeros(),
 				 (OSQPFloat*)sparse.valuePtr(),
 				 (OSQPInt*)sparse.innerIndexPtr(),
 				 (OSQPInt*)sparse.outerIndexPtr());
@@ -272,7 +286,7 @@ void NonLinearSolver<State, N, M, L>::SolveUnconstrainedQP(Control* const ukopt_
 	// Need to split operation up due to Eigen aliasing
 	matAScratch  = matM.transpose();
 	matAScratch *= matQ * matM;
-	vecBScratch  = (matM.transpose()) * matQ * matH * dx0_ * f64(-1.0);
+	vecBScratch  = (matM.transpose()) * matQ * matH * dx0_ * -1.0;
 
 	// Solve for dU https://eigen.tuxfamily.org/dox/classEigen_1_1CompleteOrthogonalDecomposition.html
 	Eigen::CompleteOrthogonalDecomposition<Eigen::MatrixX<f64>> exactSolver(matAScratch);

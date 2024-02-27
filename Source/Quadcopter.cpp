@@ -42,7 +42,9 @@ bool Quadcopter::IsApprox(const QuadcopterState& a_, const QuadcopterState& b_, 
 	{
 		return false;
 	}
-	if (Log(a_.R.inverse() * b_.R).squaredNorm() > rotTolSq_)
+
+	const Eigen::Vector3d Lab = Log(a_.R.inverse() * b_.R);
+	if (Lab.squaredNorm() > rotTolSq_)
 	{
 		return false;
 	}

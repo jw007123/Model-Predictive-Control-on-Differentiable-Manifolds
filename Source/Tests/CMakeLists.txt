@@ -10,9 +10,14 @@ endif()
 
 find_package(osqp REQUIRED)
 
-if (UNIX)
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
-endif (UNIX)
+# bigobj required for each. pthreads needed on gcc
+if (MSVC)
+	add_compile_options(/bigobj)
+elseif (UNIX)
+	add_compile_options(-Wa,-mbig-obj)
+
+	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+endif()
 
 # .obj resources
 if (EXISTS "../../Resources")
