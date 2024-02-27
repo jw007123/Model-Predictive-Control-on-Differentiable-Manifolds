@@ -2,6 +2,8 @@
 
 bool SolverTests::Run()
 {
+	using namespace std::chrono;
+
 	std::function<bool()> TestFuncs[Test::Num] =
 	{
 		std::bind(&SolverTests::TestUnconstrainedBicycleModel, this),
@@ -10,29 +12,38 @@ bool SolverTests::Run()
 		std::bind(&SolverTests::TestConstrainedQuadcopter,     this)
 	};
 
-	u32 testsPassed = 0;
+	const time_point<system_clock> allStartPt = system_clock::now();
+	u32 testsPassed							  = 0;
+
 	for (u32 i = 0; i < Test::Num; ++i)
 	{
-		const bool testPassed = TestFuncs[i]();
+		const time_point<system_clock> testStartPt = system_clock::now();
+		const bool testPassed					   = TestFuncs[i]();
+		const time_point<system_clock> testEndPt   = system_clock::now();
+		const milliseconds testTime				   = duration_cast<milliseconds>(testEndPt - testStartPt);
+
 		if (testPassed)
 		{
-			printf("%s: Passed\n\n", TestStrings[i]);
+			printf("%s: Passed in %zu[ms]\n\n", TestStrings[i], testTime.count());
 		}
 		else
 		{
-			printf("%s: Failed\n\n", TestStrings[i]);
+			printf("%s: Failed in %zu[ms]\n\n", TestStrings[i], testTime.count());
 		}
 
 		testsPassed += testPassed;
 	}
 
+	const time_point<system_clock> allEndPt = system_clock::now();
+	const milliseconds allTime				= duration_cast<milliseconds>(allEndPt - allStartPt);
+
 	if (testsPassed == Test::Num)
 	{
-		printf("All tests passed!\n\n");
+		printf("All tests passed in %zu[ms]!\n\n", allTime.count());
 	}
 	else
 	{
-		printf("Some tests failed!\n\n");
+		printf("Some tests failed in %zu[ms]!\n\n", allTime.count());
 	}
 
 	return (testsPassed == Test::Num);

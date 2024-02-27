@@ -12,14 +12,14 @@ struct QuadcopterState
 	QuadcopterState();
 };
 
-class Quadcopter : public NonLinearSolver<QuadcopterState, 9, 4, 10>
+class Quadcopter : public NonLinearSolver<QuadcopterState, 9, 4, 25>
 {
 public:
 	/// Inherit ctor from base class
-	using NonLinearSolver<QuadcopterState, 9, 4, 10>::NonLinearSolver;
+	using NonLinearSolver<QuadcopterState, 9, 4, 25>::NonLinearSolver;
 
 	/// Convenience
-	typedef NonLinearSolver<QuadcopterState, 9, 4, 10>::CreateOptions CreateOptions;
+	typedef NonLinearSolver<QuadcopterState, 9, 4, 25>::CreateOptions CreateOptions;
 
 	/// Virtuals: functions
 	Eigen::Vector<f64, 9> f(const QuadcopterState& a_, const Control& b_)											const;

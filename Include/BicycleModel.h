@@ -15,14 +15,14 @@ struct BicycleModelState
 	BicycleModelState();
 };
 
-class BicycleModel : public NonLinearSolver<BicycleModelState, 4, 2, 10>
+class BicycleModel : public NonLinearSolver<BicycleModelState, 4, 2, 25>
 {
 public:
 	/// Inherit ctor from base class
-	using NonLinearSolver<BicycleModelState, 4, 2, 10>::NonLinearSolver;
+	using NonLinearSolver<BicycleModelState, 4, 2, 25>::NonLinearSolver;
 
 	/// Convenience
-	typedef NonLinearSolver<BicycleModelState, 4, 2, 10>::CreateOptions CreateOptions;
+	typedef NonLinearSolver<BicycleModelState, 4, 2, 25>::CreateOptions CreateOptions;
 
 	/// Virtuals: functions
 	Eigen::Vector<f64, 4> f(const BicycleModelState& a_, const Control& b_)											  const;

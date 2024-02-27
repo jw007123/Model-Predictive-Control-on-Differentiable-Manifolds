@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include "Quadcopter.h"
 #include "BicycleModel.h"
 
