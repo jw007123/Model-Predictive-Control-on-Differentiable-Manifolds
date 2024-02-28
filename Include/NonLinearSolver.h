@@ -41,6 +41,7 @@ public:
 	};
 
 	NonLinearSolver(const CreateOptions options_);
+	~NonLinearSolver();
 
 	/// State transition function
 	virtual Eigen::Vector<f64, N> f(const State& a_, const Control& b_) const = 0;
@@ -73,6 +74,10 @@ private:
 	bool								  firstSolveCall; // Default false
 	const CreateOptions					  options;
 
+	/// Cache for [warm_start]s and additional functionality later
+	OSQPSettings osqpSettings;
+	OSQPSolver*	 osqpSolver;
+
 	Eigen::MatrixX<f64>      matM;	// [N * L, M * L]
 	Eigen::MatrixX<f64>      matH;	// [N * L, N]
 	Eigen::MatrixX<f64>      matQ;	// [N * L, N * L]
@@ -85,7 +90,7 @@ private:
 	void CalculateConstants(const bool calcQ_, const bool calcP_, const bool calcU_);
 
 	/// Solves an unconstrained QP problem analytically
-	void SolveUnconstrainedQP(Control* const  ukopt_, const Eigen::Vector<f64, N>& dx0_);
+	void SolveUnconstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_);
 
 	/// Solves a constrained QP problem via OSQP
 	bool SolveConstrainedQP(Control* const ukopt_, const Eigen::Vector<f64, N>& dx0_);
@@ -133,8 +138,21 @@ NonLinearSolver<State, N, M, L>::NonLinearSolver(const NonLinearSolver::CreateOp
 	matP.setZero();
 	matdU.setZero();
 
+	// Uses settings as in osqp_api_constants. Disable logging
+	osqp_set_default_settings(&osqpSettings);
+	osqpSettings.verbose = false;
+
 	// Used to determine when to call CalculateConstants()
 	firstSolveCall = true;
+}
+
+template <typename State, u32 N, u32 M, u32 L>
+NonLinearSolver<State, N, M, L>::~NonLinearSolver()
+{
+	if (!((u8)options & (u8)CreateOptions::IgnoreUBounds))
+	{
+		osqp_cleanup(osqpSolver);
+	}
 }
 
 template <typename State, u32 N, u32 M, u32 L>
@@ -329,13 +347,7 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, 
 	EigenToOSQPCsc(matpU, sparsepU, cscpU);
 
 	// Setup osqp vars
-	OSQPSolver*	 osqpSolver;
-	OSQPSettings osqpSettings;
-	OSQPInt		 osqpExitFlag;
-
-	// Uses settings as in osqp_api_constants. Disable logging
-	osqp_set_default_settings(&osqpSettings);
-	osqpSettings.verbose = false;
+	OSQPInt osqpExitFlag;
 
 	// Setup solving and check for errors
 	const OSQPFloat* uMin = (OSQPFloat*)matdU.col(0).data();
@@ -366,9 +378,6 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, 
 			}
 		}
 	}
-
-	// Cleanup
-	osqp_cleanup(osqpSolver);
 
 	return (osqpExitFlag == 0) && (solveErrors == 0);
 }
