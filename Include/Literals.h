@@ -9,6 +9,3 @@ typedef unsigned short         u16;
 typedef long unsigned int      u32;
 typedef long long unsigned int u64;
 typedef size_t                 usize;
-
-constexpr usize PATH_MAX_LEN = 1024;
-constexpr f32   EPSILON_F32  = 0.000001f;

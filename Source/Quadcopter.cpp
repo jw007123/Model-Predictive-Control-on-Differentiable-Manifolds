@@ -11,7 +11,7 @@ Eigen::Vector<f64, 9> Quadcopter::f(const QuadcopterState& a_, const Control& b_
 {
 	constexpr const f64 g = 9.80665;
 
-	// State equation f in(33c) https://arxiv.org/pdf/2106.15233.pdf
+	// State equation f in (33c) https://arxiv.org/pdf/2106.15233.pdf
 	Eigen::Vector<f64, 9> fk;
 	fk.segment<3>(0) = a_.vI;
 	fk.segment<3>(3) = Eigen::Vector3d(0.0, 0.0, -g) - (b_(0) * a_.R * Eigen::Vector3d::UnitZ());

@@ -14,7 +14,16 @@
 
 #include "Literals.h"
 
-/// N:= Dim(State); M:= Dim(Control); L:= Lookahead
+/*
+*	An implementation of https://arxiv.org/pdf/2106.15233.pdf.
+*	Thanks to OSQP at https://osqp.org/ for constrained QP solving.
+* 
+*	State := Container for motion model state. Does not
+*			 need to be a vector!
+*	N     := Dim(delta State)
+*   M     := Dim(delta Control)
+*   L     := Num of lookahead increments
+*/
 template <typename State, u32 N, u32 M, u32 L>
 class NonLinearSolver
 {
@@ -324,7 +333,7 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, 
 	OSQPSettings osqpSettings;
 	OSQPInt		 osqpExitFlag;
 
-	// Uses settings as in osqp_api_constants
+	// Uses settings as in osqp_api_constants. Disable logging
 	osqp_set_default_settings(&osqpSettings);
 	osqpSettings.verbose = false;
 
@@ -342,11 +351,13 @@ bool NonLinearSolver<State, N, M, L>::SolveConstrainedQP(Control* const ukopt_, 
 									   M * L,				// n
 									   &osqpSettings);		// settings
 
+	// If no errors in setup...
 	if (!osqpExitFlag)
 	{
+		// Solve (well, duh?)
 		solveErrors = osqp_solve(osqpSolver);
 
-		// Pass solution across
+		// Copy solution into ukopt_ for the return
 		for (u32 i = 0; i < L; ++i)
 		{
 			for (u32 j = 0; j < M; ++j)
