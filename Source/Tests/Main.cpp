@@ -12,7 +12,7 @@ int main()
 {
 	printf("Running solver unit tests...\n\n");
 
-	SolverTests solverTests;
+	ModelPredictiveControl::SolverTests solverTests;
 	if (!solverTests.Run())
 	{
 		std::this_thread::sleep_for(std::chrono::seconds(5));
