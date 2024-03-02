@@ -5,11 +5,6 @@ then
 	git clone https://gitlab.com/libeigen/eigen.git External/eigen
 fi
 
-if [ ! -d "External/stb" ]
-then
-	git clone https://github.com/nothings/stb.git External/stb
-fi
-
 if [ ! -d "External/osqp" ]
 then
 	git clone https://github.com/osqp/osqp.git External/osqp

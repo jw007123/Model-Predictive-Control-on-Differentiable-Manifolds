@@ -1,6 +1,5 @@
 @echo off
 git clone https://gitlab.com/libeigen/eigen.git External/eigen
-git clone https://github.com/nothings/stb.git External/stb
 git clone https://github.com/osqp/osqp.git External/osqp
 
 cd External/osqp
